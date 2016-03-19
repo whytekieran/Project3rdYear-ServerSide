@@ -111,7 +111,12 @@ public class ClientRequestThread extends Thread
 	private boolean foundReminder = false;				//True if reminder was found
 	private boolean reminderDelete = false;				//True if reminder was found
 	private ArrayList<Reminder> remindersList;		    //List of reminders
-	private boolean validSearchDate;
+	private boolean validSearchDate;					//Determines if date used for searching is valid
+	private String sHouseType;							//Holds type of house being searched for r or b
+	private String fName;								//Hold first names sent from client for searching
+	private String LName;								//Hold last names sent from client for searching
+	private String address;								//Holds address sent from client for searching
+	private String county;								//Holds county sent from client for searching
 	
 	//SQL Variables
 	private Connection con;							//Connection object to get a connection
@@ -1807,6 +1812,385 @@ public class ClientRequestThread extends Thread
 							
 							server.sendMessage(remindersList);//send the list of reminders back to the server
 						}
+						break;
+					case 51:
+						//SEARCH STAFF BY FIRST NAME (SERVER SIDE)
+						staffMembers = new ArrayList<StaffMember>();//array list to hold all staff members
+						fName = server.getClientMessage();//get search first name sent from the client
+						result = db.getResults("SELECT Id, FirstName, LastName, Address, PPS, Salary, EmploymentType FROM staff WHERE FirstName LIKE '"+fName+"%'");//execute select statement and return results
+						
+						//Loop over the results and add each staff members data to an object which is then
+						//added to a list
+						while(result.next())
+						{
+							StaffMember member = new StaffMember();
+							
+							member.setId(Integer.parseInt(result.getString(1)));
+							member.setFirstName(result.getString(2));
+							member.setLastName(result.getString(3));
+							member.setAddress(result.getString(4));
+							member.setPps(result.getString(5));
+							member.setSalary(Double.parseDouble(result.getString(6)));
+							member.setStaffType(result.getString(7).charAt(0));
+						
+							staffMembers.add(member);//add to list
+						}
+						
+						server.sendMessage(staffMembers);//send back the array list of staff to the client
+						break;
+					case 52:
+						//SEARCH STAFF BY LAST NAME (SERVER SIDE)
+						staffMembers = new ArrayList<StaffMember>();//array list to hold all staff members
+						LName = server.getClientMessage();//get search first name sent from the client
+						result = db.getResults("SELECT Id, FirstName, LastName, Address, PPS, Salary, EmploymentType FROM staff WHERE LastName LIKE '"+LName+"%'");//execute select statement and return results
+						
+						//Loop over the results and add each staff members data to an object which is then
+						//added to a list
+						while(result.next())
+						{
+							StaffMember member = new StaffMember();
+							
+							member.setId(Integer.parseInt(result.getString(1)));
+							member.setFirstName(result.getString(2));
+							member.setLastName(result.getString(3));
+							member.setAddress(result.getString(4));
+							member.setPps(result.getString(5));
+							member.setSalary(Double.parseDouble(result.getString(6)));
+							member.setStaffType(result.getString(7).charAt(0));
+						
+							staffMembers.add(member);//add to list
+						}
+						
+						server.sendMessage(staffMembers);//send back the array list of staff to the client
+						break;
+					case 53:
+						//SEARCH STAFF BY EMPLOYMENT TYPE (SERVER SIDE)
+						staffMembers = new ArrayList<StaffMember>();//array list to hold all staff members
+						String empType =  server.getClientMessage();//get search emp type sent from the client
+						result = db.getResults("SELECT Id, FirstName, LastName, Address, PPS, Salary, EmploymentType FROM staff WHERE EmploymentType='"+empType+"'");//execute select statement and return results
+						
+						//Loop over the results and add each staff members data to an object which is then
+						//added to a list
+						while(result.next())
+						{
+							StaffMember member = new StaffMember();
+							
+							member.setId(Integer.parseInt(result.getString(1)));
+							member.setFirstName(result.getString(2));
+							member.setLastName(result.getString(3));
+							member.setAddress(result.getString(4));
+							member.setPps(result.getString(5));
+							member.setSalary(Double.parseDouble(result.getString(6)));
+							member.setStaffType(result.getString(7).charAt(0));
+						
+							staffMembers.add(member);//add to list
+						}
+						
+						server.sendMessage(staffMembers);//send back the array list of staff to the client
+						break;
+					case 54:
+						//SEARCH FOR ALL RENTABLE HOUSES (SERVER SIDE)
+						sHouseType = server.getClientMessage();
+						houses = new ArrayList<House>();//array list to hold all houses
+						result = db.getResults("SELECT Id, Street, Town, County, BuyOrRent FROM house WHERE BuyOrRent='"+sHouseType+"'");//execute select statement and return results
+						
+						//Loop over the results and add each houses data to an object which is then
+						//added to a list
+						while(result.next())
+						{
+							House listMember = new House();
+							
+							listMember.setId(Integer.parseInt(result.getString(1)));
+							listMember.setStreet(result.getString(2));
+							listMember.setTown(result.getString(3));
+							listMember.setCounty(result.getString(4));
+							listMember.setRentOrSale(result.getString(5).charAt(0));
+							
+							houses.add(listMember);//add to list
+						}
+						
+						server.sendMessage(houses);//send back the array list of houses to the client
+						break;
+					case 55:
+						//SEARCH FOR ALL BUYABLE HOUSES (SERVER SIDE)
+						sHouseType = server.getClientMessage();
+						houses = new ArrayList<House>();//array list to hold all houses
+						result = db.getResults("SELECT Id, Street, Town, County, BuyOrRent FROM house WHERE BuyOrRent='"+sHouseType+"'");//execute select statement and return results
+						
+						//Loop over the results and add each houses data to an object which is then
+						//added to a list
+						while(result.next())
+						{
+							House listMember = new House();
+							
+							listMember.setId(Integer.parseInt(result.getString(1)));
+							listMember.setStreet(result.getString(2));
+							listMember.setTown(result.getString(3));
+							listMember.setCounty(result.getString(4));
+							listMember.setRentOrSale(result.getString(5).charAt(0));
+							
+							houses.add(listMember);//add to list
+						}
+						
+						server.sendMessage(houses);//send back the array list of houses to the client
+						break;
+					case 56:
+						//SEARCH FOR HOUSES BY TOWN NAME(SERVER SIDE)
+						String town = server.getClientMessage();
+						houses = new ArrayList<House>();//array list to hold all houses
+						result = db.getResults("SELECT Id, Street, Town, County, BuyOrRent FROM house WHERE Town LIKE '"+town+"%'");//execute select statement and return results
+						
+						//Loop over the results and add each houses data to an object which is then
+						//added to a list
+						while(result.next())
+						{
+							House listMember = new House();
+							
+							listMember.setId(Integer.parseInt(result.getString(1)));
+							listMember.setStreet(result.getString(2));
+							listMember.setTown(result.getString(3));
+							listMember.setCounty(result.getString(4));
+							listMember.setRentOrSale(result.getString(5).charAt(0));
+							
+							houses.add(listMember);//add to list
+						}
+						
+						server.sendMessage(houses);//send back the array list of houses to the client
+						break;
+					case 57:
+						//SEARCH FOR HOUSES BY COUNTY NAME(SERVER SIDE)
+						county = server.getClientMessage();
+						houses = new ArrayList<House>();//array list to hold all houses
+						result = db.getResults("SELECT Id, Street, Town, County, BuyOrRent FROM house WHERE County LIKE '"+county+"%'");//execute select statement and return results
+						
+						//Loop over the results and add each houses data to an object which is then
+						//added to a list
+						while(result.next())
+						{
+							House listMember = new House();
+							
+							listMember.setId(Integer.parseInt(result.getString(1)));
+							listMember.setStreet(result.getString(2));
+							listMember.setTown(result.getString(3));
+							listMember.setCounty(result.getString(4));
+							listMember.setRentOrSale(result.getString(5).charAt(0));
+							
+							houses.add(listMember);//add to list
+						}
+						
+						server.sendMessage(houses);//send back the array list of houses to the client
+						break;
+					case 58:
+						//SEARCH CUSTOMER BY FIRST NAME (SERVER SIDE)
+						customers = new ArrayList<Customer>();//array list to hold all customers
+						fName = server.getClientMessage();//get search first name sent from the client
+						result = db.getResults("SELECT CustomerID, FirstName, LastName, Address FROM customer WHERE FirstName LIKE '"+fName+"%'");//execute select statement and return results
+						
+						//Loop over the results and add each customers data to an object which is then
+						//added to a list
+						while(result.next())
+						{
+							Customer c = new Customer();
+							
+							c.setCustID(Integer.parseInt(result.getString(1)));
+							c.setfName(result.getString(2));
+							c.setlName(result.getString(3));
+							c.setAddress(result.getString(4));
+						
+							customers.add(c);//add to list
+						}
+						
+						server.sendMessage(customers);//send back the array list of staff to the client
+						break;
+					case 59:
+						//SEARCH CUSTOMER BY LAST NAME (SERVER SIDE)
+						customers = new ArrayList<Customer>();//array list to hold all customers
+						LName = server.getClientMessage();//get search last name sent from the client
+						result = db.getResults("SELECT CustomerID, FirstName, LastName, Address FROM customer WHERE LastName LIKE '"+LName+"%'");//execute select statement and return results
+						
+						//Loop over the results and add each customers data to an object which is then
+						//added to a list
+						while(result.next())
+						{
+							Customer c = new Customer();
+							
+							c.setCustID(Integer.parseInt(result.getString(1)));
+							c.setfName(result.getString(2));
+							c.setlName(result.getString(3));
+							c.setAddress(result.getString(4));
+						
+							customers.add(c);//add to list
+						}
+						
+						server.sendMessage(customers);//send back the array list of staff to the client
+						break;
+					case 60:
+						//SEARCH CUSTOMER BY ADDRESS (SERVER SIDE)
+						customers = new ArrayList<Customer>();//array list to hold all customers
+						address = server.getClientMessage();//get search address sent from the client
+						result = db.getResults("SELECT CustomerID, FirstName, LastName, Address FROM customer WHERE Address LIKE '%"+address+"%'");//execute select statement and return results
+						
+						//Loop over the results and add each customers data to an object which is then
+						//added to a list
+						while(result.next())
+						{
+							Customer c = new Customer();
+							
+							c.setCustID(Integer.parseInt(result.getString(1)));
+							c.setfName(result.getString(2));
+							c.setlName(result.getString(3));
+							c.setAddress(result.getString(4));
+						
+							customers.add(c);//add to list
+						}
+						
+						server.sendMessage(customers);//send back the array list of staff to the client
+						break;
+					case 61:
+						//SEARCH FOR BUY TRANSACTIONS IN A CERTAIN COUNTY (SERVER SIDE)
+						sHouses = new ArrayList<SellableHouse>();//list to hold sellable house objects(data)
+						houses = new ArrayList<House>();//list to hold house objects(data)
+						estateAgentIDs = new ArrayList<Integer>();//list to hold estate agent ids
+						custIDs = new ArrayList<Integer>();//list to hold customer ids
+						county = server.getClientMessage();//get search county sent from the client
+						//example using joins in the sql queries
+						result = db.getResults("SELECT sellhouses.BuyID, sellhouses.HouseID, sellhouses.Cost, sellhouses.EstateAgentID, sellhouses.CustomerID, house.Street, house.Town, house.County" +
+												" FROM sellhouses" +
+												" INNER JOIN house" +
+												" ON house.County='"+county+"' AND house.Id = sellhouses.HouseID");//execute select statement and return results
+						
+						//Loop over the results and add data to objects which are then
+						//added to lists
+						while(result.next())
+						{
+							SellableHouse sh = new SellableHouse();
+							House h = new House();
+							
+							sh.setId(Integer.parseInt(result.getString(1)));
+							h.setId(Integer.parseInt(result.getString(2)));
+							sh.setCost(Double.parseDouble(result.getString(3)));
+							estateAgentIDs.add(Integer.parseInt(result.getString(4)));
+							custIDs.add(Integer.parseInt(result.getString(5)));
+							h.setStreet(result.getString(6));
+							h.setTown(result.getString(7));
+							h.setCounty(result.getString(8));
+							
+							sHouses.add(sh);//add to list of sellable houses
+							houses.add(h);//add to list of houses
+						}
+						
+						server.sendMessage(sHouses);//send back the array list of sellable houses (trans) to the client
+						server.sendMessage(houses);//send back the array list of houses to the client
+						server.sendMessage(estateAgentIDs);//send back the array list of houses to the client
+						server.sendMessage(custIDs);//send back the array list of houses to the client
+						break;
+					case 62:
+						//SEARCH FOR BUY TRANSACTIONS BY COST (>, <, =) (SERVER SIDE)
+						sHouses = new ArrayList<SellableHouse>();//list to hold sellable house objects(data)
+						buyIDs = new ArrayList<Integer>();//array list to hold rent ids
+						estateAgentIDs = new  ArrayList<Integer>();//array list to hold estate agent ids
+						custIDs = new ArrayList<Integer>();//array list to hold customer ids
+						String operator = server.getClientMessage();
+						String cost = server.getClientMessage();
+						result = db.getResults("SELECT BuyID, HouseID, Cost, EstateAgentID, CustomerID FROM sellhouses WHERE Cost "+operator+" "+cost);//execute select statement and return results
+						
+						//Loop over the results and add data to objects which are then
+						//added to lists
+						while(result.next())
+						{
+							SellableHouse sListMember = new SellableHouse();
+							
+							buyIDs.add(Integer.parseInt(result.getString(1)));
+							sListMember.setId(Integer.parseInt(result.getString(2)));
+							sListMember.setCost(Double.parseDouble(result.getString(3)));
+							estateAgentIDs.add(Integer.parseInt(result.getString(4)));
+							custIDs.add(Integer.parseInt(result.getString(5)));
+							sHouses.add(sListMember);//add to list
+						}
+						
+						server.sendMessage(buyIDs);//send an array list of buy ids to the client
+						server.sendMessage(sHouses);//send back the array list of buy house transactions to the client
+						server.sendMessage(estateAgentIDs);//send an array list of estate agent ids to the client
+						server.sendMessage(custIDs);//send an array list of customer id to the client
+						break;
+						//SEARCH FOR BUY TRANSACTIONS INVOLVING A CERTAIN CUSTOMER (SERVER SIDE)
+					case 63:
+						buyIDs = new ArrayList<Integer>();
+						sHouses = new ArrayList<SellableHouse>();	//list to hold sellable house objects(data)
+						customers = new ArrayList<Customer>();			//list to hold house objects(data)
+						estateAgentIDs = new ArrayList<Integer>();	//list to hold estate agent ids
+						id = server.getSearchID();					//get search id from the client
+						
+						//example using joins in the sql queries
+						result = db.getResults("SELECT sellhouses.BuyID, sellhouses.HouseID, sellhouses.Cost, sellhouses.EstateAgentID, sellhouses.CustomerID, customer.FirstName, customer.LastName, customer.Address" +
+						" FROM sellhouses" +
+						" INNER JOIN customer" +
+						" ON sellhouses.CustomerID="+id+" AND sellhouses.CustomerID = customer.CustomerID;");//execute select statement and return results
+						
+						//Loop over the results and add each staff members data to an object which is then
+						//added to a list
+						while(result.next())
+						{
+							SellableHouse sh = new SellableHouse();
+							Customer c = new Customer();
+							
+							buyIDs.add(Integer.parseInt(result.getString(1)));
+							sh.setId(Integer.parseInt(result.getString(2)));
+							sh.setCost(Double.parseDouble(result.getString(3)));
+							estateAgentIDs.add(Integer.parseInt(result.getString(4)));
+							c.setCustID(Integer.parseInt(result.getString(5)));
+							c.setfName(result.getString(6));
+							c.setlName(result.getString(7));
+							c.setAddress(result.getString(8));
+							
+							sHouses.add(sh);//add to list of sellable houses
+							customers.add(c);//add to list of associated customers
+						}
+						
+						server.sendMessage(buyIDs);
+						server.sendMessage(sHouses);//send back the array list of sellable houses (trans) to the client
+						server.sendMessage(customers);//send back the array list of houses to the client
+						server.sendMessage(estateAgentIDs);//send back the array list of houses to the client
+						break;
+					case 64:
+						//SEARCH FOR BUY TRANSACTIONS INVOLVING A CERTAIN ESTATE AGENT(SERVER SIDE)
+						buyIDs = new ArrayList<Integer>();						//list to hold buy ids
+						sHouses = new ArrayList<SellableHouse>();				//list to hold sellable house objects(data)
+						staffMembers  = new ArrayList<StaffMember>();			//list to hold staff member objects(data)
+						custIDs = new ArrayList<Integer>();
+						id = server.getSearchID();								//get search id from the client
+						
+						//example using joins in the sql queries
+						result = db.getResults("SELECT sellhouses.BuyID, sellhouses.HouseID, sellhouses.Cost, sellhouses.CustomerID, sellhouses.EstateAgentID, staff.FirstName, staff.LastName, staff.Address"+
+												" FROM sellhouses"+
+												" INNER JOIN staff"+
+												" ON sellhouses.EstateAgentID="+id+" AND sellhouses.EstateAgentID = staff.Id;");//execute select statement and return results
+						
+						//Loop over the results and add each staff members data to an object which is then
+						//added to a list
+						while(result.next())
+						{
+							SellableHouse sh = new SellableHouse();
+							StaffMember sm = new StaffMember();
+							
+							buyIDs.add(Integer.parseInt(result.getString(1)));
+							sh.setId(Integer.parseInt(result.getString(2)));
+							sh.setCost(Double.parseDouble(result.getString(3)));
+							custIDs.add(Integer.parseInt(result.getString(4)));
+							sm.setId(Integer.parseInt(result.getString(5)));
+							sm.setFirstName(result.getString(6));
+							sm.setLastName(result.getString(7));
+							sm.setAddress(result.getString(8));
+							
+							
+							sHouses.add(sh);//add to list of sellable houses
+							staffMembers.add(sm);//add to list of associated estate agent (staff member)
+						}
+						
+						server.sendMessage(buyIDs);//send list of buy ids
+						server.sendMessage(sHouses);//send back the array list of sellable houses (trans) to the client
+						server.sendMessage(custIDs);//send back the array list of customer ids to the client
+						server.sendMessage(staffMembers);//send back the array list of staff members
 						break;
 				}//end switch
 			}//end try block
