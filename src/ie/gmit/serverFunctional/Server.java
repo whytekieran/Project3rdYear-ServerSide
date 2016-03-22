@@ -227,16 +227,20 @@ public class Server
 		String usersDirectoryPath = path + "/" + username; 						//Create a path for the user
 		File file = new File(usersDirectoryPath);								//File/Directory object
 		File welcomeFile = new File(usersDirectoryPath + "/Welcome.txt"); 		//Path for welcome file
+		File reminderFile = new File(usersDirectoryPath + "/Reminder.txt"); 		//Path for reminder file
 		FileWriter writer = null;
 		
-		//If the directory does not exist
+		//If the users directory does not exist
 		if(!file.exists())
 		{
 			file.mkdir();															//Then create it
 			welcomeFile.getParentFile().mkdirs(); 									//Ensure that the parent directories exist before writing
+			reminderFile.getParentFile().mkdirs();
+			
 			try 
 			{
 				welcomeFile.createNewFile();										//Create welcome file inside the directory
+				reminderFile.createNewFile();										//create file for reminders
 				writer = new FileWriter(welcomeFile);								//Access the file for writing
 				writer.write("Hello " +username+ " welcome to the file server");	//write welcome message
 				writer.close();

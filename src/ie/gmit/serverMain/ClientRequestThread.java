@@ -16,19 +16,27 @@ import ie.gmit.serverFunctional.TimeValidator;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.PrintWriter;
 import java.net.Socket;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
+import java.util.Scanner;
 
 /*ClientRequestThread class extends thread and hence is a thread. Each time a client makes a connection
  with the server the server main spawns off one of these threads. There is one thread for each
@@ -71,7 +79,6 @@ public class ClientRequestThread extends Thread
 	private boolean userExist;						//true if a user exists
 	private String onlineFileRemoveName;			//Name of online file to be removed
 	private ManagementApplicationDatabase db;		//Database Application object for using apps db
-	private StaffMember staff;						//Holds staff members
 	private boolean foundHouse = false;				//True if house is found
 	private boolean houseDeletion = false;			//True if house can be deleted
 	private ArrayList<House> houses;				//List of houses
@@ -109,14 +116,25 @@ public class ClientRequestThread extends Thread
 	private boolean reminderDateValid;					//True if reminder date is a valid date
 	private boolean reminderTimeValid;					//True if reminder time is a valid time
 	private boolean foundReminder = false;				//True if reminder was found
-	private boolean reminderDelete = false;				//True if reminder was found
 	private ArrayList<Reminder> remindersList;		    //List of reminders
 	private boolean validSearchDate;					//Determines if date used for searching is valid
-	private String sHouseType;							//Holds type of house being searched for r or b
+	private String houseType;							//Holds type of house being searched for r or b
 	private String fName;								//Hold first names sent from client for searching
 	private String LName;								//Hold last names sent from client for searching
 	private String address;								//Holds address sent from client for searching
 	private String county;								//Holds county sent from client for searching
+	private String operator;							//Holds =, < and > operations 
+	private StaffMember staff;							//Holds staff members data
+	private House house;								//Holds house data
+	private RentableHouse rHouse;						//Holds rentable house data
+	private SellableHouse sHouse;						//Holds sellable house data
+	private Customer customer;							//Holds customer data
+	private Reminder reminder; 							//Holds reminder data
+	private boolean isWhitespace = false;				//True if a word contains whitespace
+	private Scanner fileReader;							//Used to read txt files
+	ArrayList<Reminder> reminderList;
+	Reminder rListMember;
+	private PrintWriter fileWriter;						//Used to write to file
 	
 	//SQL Variables
 	private Connection con;							//Connection object to get a connection
@@ -151,7 +169,7 @@ public class ClientRequestThread extends Thread
 					case 1:
 						user = server.getUserInformation(); //Get user object from the client
 						result = db.getResults("SELECT Username, Password, EmploymentType FROM users");//execute select statement and return results
-						
+					
 						/*Loop over the results and see if any match the User authentication information sent
 						  from the client*/
 						while(result.next())
@@ -174,8 +192,43 @@ public class ClientRequestThread extends Thread
 							//then returns the path of the users online file directory which it created.
 							userRootDirectoryPath = server.createUserDirectory(serversFilePath, username);
 							
-							//send success signal
+							int rows = 0;//open the reminder file for reading
+							fileReader = new Scanner(new FileReader(userRootDirectoryPath + "/Reminder.txt"));
+							DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");//date formatter
+							Date todaysDate = new Date();//date object
+							
+							while(fileReader.hasNext())///loop over file rows
+							{
+								rListMember = new Reminder();
+									
+								rListMember.setReminderID(fileReader.nextInt());//get data 
+								rListMember.setSubject(fileReader.next());
+								rListMember.setDate(fileReader.next());
+								rListMember.setTime(fileReader.next());
+								String[] words = fileReader.nextLine().split("\\s");//multi word desc is split into array
+								String desc = "";
+								for(int i = 0; i < words.length; ++i)
+								{
+									desc += words[i]+" ";//array combined into single string
+								}
+								rListMember.setDesc(desc);//add single string as the description
+									
+								if(rListMember.getDate().equals(dateFormat.format(todaysDate)))//if reminder found for today increment counter
+								{						
+									++rows;
+								}
+								else//otherwise move to next iteration
+								{
+									continue;
+								}
+							}//end read while loop
+								
+							fileReader.close();//close reader
+						
+							//Send success signal
 							server.sendMessage("1");
+							//Send the amount of reminders found for today
+							server.sendMessage(rows);
 						}
 						else if(authenticated == false)//If not send 0 and end loop so connection terminates
 						{
@@ -228,8 +281,9 @@ public class ClientRequestThread extends Thread
 						
 						if(userCreate == true && staffExists == true)
 						{
-					    	db.executeStatement("INSERT INTO users (StaffID, Username, Password, EmploymentType) VALUES "
-								+ "('"+user.getStaffID()+"', '"+user.getUsername()+"', '"+user.getPassword()+"', '"+Character.toString(user.getStaffType())+"')");
+							db.executeStatement("INSERT INTO users (StaffID, Username, Password, EmploymentType) VALUES "
+										+ "('"+user.getStaffID()+"', '"+user.getUsername()+"', '"+user.getPassword()+"', '"+Character.toString(user.getStaffType())+"')");
+							
 					    	
 					    	server.sendMessage("1");
 						}
@@ -339,7 +393,7 @@ public class ClientRequestThread extends Thread
 						break;
 						//FINDING A STAFF MEMBER(SERVER SIDE)
 					case 7:
-						StaffMember findStaff = new StaffMember();//create object to hold the data
+						staff = new StaffMember();//create object to hold the data
 						searchID = server.getSearchID();//get search id from the client
 						result = db.getResults("SELECT Id, FirstName, LastName, Address, PPS, Salary, EmploymentType FROM staff");//execute select statement and return results
 						
@@ -351,12 +405,12 @@ public class ClientRequestThread extends Thread
 							if(result.getString(1).equalsIgnoreCase(Integer.toString(searchID)))
 							{
 								//So add the found staff members data to a StaffMember object
-								findStaff.setFirstName(result.getString(2));
-								findStaff.setLastName(result.getString(3));
-								findStaff.setAddress(result.getString(4));
-								findStaff.setPps(result.getString(5));
-								findStaff.setSalary(Double.parseDouble(result.getString(6)));
-								findStaff.setStaffType(result.getString(7).charAt(0));
+								staff.setFirstName(result.getString(2));
+								staff.setLastName(result.getString(3));
+								staff.setAddress(result.getString(4));
+								staff.setPps(result.getString(5));
+								staff.setSalary(Double.parseDouble(result.getString(6)));
+								staff.setStaffType(result.getString(7).charAt(0));
 								foundStaffMember = true; //If the we can send back staff information
 								break;			   //break the loop
 							}
@@ -369,7 +423,7 @@ public class ClientRequestThread extends Thread
 					    if(foundStaffMember == true)//if we found a staff member
 					    {
 					    	server.sendMessage("1");					//send okay signal
-					    	server.sendStaffInformation(findStaff);	//send the staff member
+					    	server.sendStaffInformation(staff);	//send the staff member
 					    }
 					    else if(foundStaffMember == false)//otherwise
 					    {
@@ -430,17 +484,17 @@ public class ClientRequestThread extends Thread
 						//added to a list
 						while(result.next())
 						{
-							StaffMember member = new StaffMember();
+							staff = new StaffMember();
 							
-							member.setId(Integer.parseInt(result.getString(1)));
-							member.setFirstName(result.getString(2));
-							member.setLastName(result.getString(3));
-							member.setAddress(result.getString(4));
-							member.setPps(result.getString(5));
-							member.setSalary(Double.parseDouble(result.getString(6)));
-							member.setStaffType(result.getString(7).charAt(0));
+							staff.setId(Integer.parseInt(result.getString(1)));
+							staff.setFirstName(result.getString(2));
+							staff.setLastName(result.getString(3));
+							staff.setAddress(result.getString(4));
+							staff.setPps(result.getString(5));
+							staff.setSalary(Double.parseDouble(result.getString(6)));
+							staff.setStaffType(result.getString(7).charAt(0));
 						
-							staffMembers.add(member);//add to list
+							staffMembers.add(staff);//add to list
 						}
 						
 						server.sendMessage(staffMembers);//send back the array list of staff to the client
@@ -448,7 +502,7 @@ public class ClientRequestThread extends Thread
 					case 11:
 						//SEARCH FOR A STAFF MEMBER (SERVER SIDE)
 						searchID = server.getSearchID();				   //Get search id from client
-						StaffMember retreivedMember = new StaffMember();  //object to hold found staff member
+						staff = new StaffMember();  //object to hold found staff member
 						
 						result = db.getResults("SELECT Id FROM staff");//execute select statement and return results
 						
@@ -474,16 +528,16 @@ public class ClientRequestThread extends Thread
 							result = db.getResults("SELECT Id, FirstName, LastName, Address, PPS, Salary, EmploymentType FROM staff WHERE Id="+searchID);//execute select statement and return results
 							result.next();//move to start of retrieved record
 							//Pass the data into staff member object
-							retreivedMember.setId(Integer.parseInt(result.getString(1)));
-							retreivedMember.setFirstName(result.getString(2));
-							retreivedMember.setLastName(result.getString(3));
-							retreivedMember.setAddress(result.getString(4));
-							retreivedMember.setPps(result.getString(5));
-							retreivedMember.setSalary(Double.parseDouble(result.getString(6)));
-							retreivedMember.setStaffType(result.getString(7).charAt(0));
+							staff.setId(Integer.parseInt(result.getString(1)));
+							staff.setFirstName(result.getString(2));
+							staff.setLastName(result.getString(3));
+							staff.setAddress(result.getString(4));
+							staff.setPps(result.getString(5));
+							staff.setSalary(Double.parseDouble(result.getString(6)));
+							staff.setStaffType(result.getString(7).charAt(0));
 							
 							server.sendMessage("1");						//send okay signal
-							server.sendStaffInformation(retreivedMember);	//send the object
+							server.sendStaffInformation(staff);	//send the object
 						}
 						else if(staffMemberExists == false)//otherwise
 						{
@@ -686,7 +740,7 @@ public class ClientRequestThread extends Thread
 						break;
 					case 20:
 						//CREATING A NEW HOUSE, RECIEVING HOUSE DATA TO THE SERVER (SERVER SIDE)
-						House house = new House(); //Create house object
+						house = new House(); //Create house object
 						house = server.getHouseInformation(); //Get house object from client
 						
 						//Make sure user has entered information into the fields provided
@@ -708,7 +762,7 @@ public class ClientRequestThread extends Thread
 						break;
 					case 21:
 						//SEARCHING FOR A PARTICULAR HOUSE
-						House findHouse = new House();//create object to hold the data
+						house = new House();//create object to hold the data
 						searchID = server.getSearchID();//get search id from the client
 						result = db.getResults("SELECT Id, Street, Town, County, BuyOrRent FROM house");//execute select statement and return results
 						
@@ -720,10 +774,10 @@ public class ClientRequestThread extends Thread
 							if(result.getString(1).equalsIgnoreCase(Integer.toString(searchID)))
 							{
 								//So add the found house data to a StaffMember object
-								findHouse.setStreet(result.getString(2));
-								findHouse.setTown(result.getString(3));
-								findHouse.setCounty(result.getString(4));
-								findHouse.setRentOrSale(result.getString(5).charAt(0));
+								house.setStreet(result.getString(2));
+								house.setTown(result.getString(3));
+								house.setCounty(result.getString(4));
+								house.setRentOrSale(result.getString(5).charAt(0));
 								
 								foundHouse = true; //If the we can send back house information
 								break;			   //break the loop
@@ -737,7 +791,7 @@ public class ClientRequestThread extends Thread
 					    if(foundHouse == true)//if we found a house
 					    {
 					    	server.sendMessage("1");					//send okay signal
-					    	server.sendHouseInformation(findHouse);
+					    	server.sendHouseInformation(house);
 					    }
 					    else if(foundHouse == false)//otherwise
 					    {
@@ -746,13 +800,13 @@ public class ClientRequestThread extends Thread
 						break;
 					case 22:
 						//UPDATING HOUSE (SERVER SIDE)
-						House updateHouse = new House();
+						house = new House();
 						searchID = server.getSearchID(); //get search id from client
-						updateHouse = server.getHouseInformation(); //get house object from client with update data
+						house = server.getHouseInformation(); //get house object from client with update data
 				
 						//execute the statement
-						db.executeStatement("UPDATE house SET Street = '" +updateHouse.getStreet()+ "', Town = '" +updateHouse.getTown()+ "', "
-								+ "County = '" +updateHouse.getCounty()+ "', BuyOrRent = '" +Character.toString(updateHouse.getRentOrSale())+ 
+						db.executeStatement("UPDATE house SET Street = '" +house.getStreet()+ "', Town = '" +house.getTown()+ "', "
+								+ "County = '" +house.getCounty()+ "', BuyOrRent = '" +Character.toString(house.getRentOrSale())+ 
 								"' WHERE Id = '" +searchID+"'");//execute select statement and return results
 					
 					    //send okay signal
@@ -798,15 +852,15 @@ public class ClientRequestThread extends Thread
 						//added to a list
 						while(result.next())
 						{
-							House listMember = new House();
+							house = new House();
 							
-							listMember.setId(Integer.parseInt(result.getString(1)));
-							listMember.setStreet(result.getString(2));
-							listMember.setTown(result.getString(3));
-							listMember.setCounty(result.getString(4));
-							listMember.setRentOrSale(result.getString(5).charAt(0));
+							house.setId(Integer.parseInt(result.getString(1)));
+							house.setStreet(result.getString(2));
+							house.setTown(result.getString(3));
+							house.setCounty(result.getString(4));
+							house.setRentOrSale(result.getString(5).charAt(0));
 							
-							houses.add(listMember);//add to list
+							houses.add(house);//add to list
 						}
 						
 						server.sendMessage(houses);//send back the array list of houses to the client
@@ -814,7 +868,7 @@ public class ClientRequestThread extends Thread
 					case 25:
 						//SEARCH FOR A HOUSE (SERVER SIDE)
 						searchID = server.getSearchID();				   //Get search id from client
-						House retreivedHouse = new House();  //object to hold found house
+						house = new House();  //object to hold found house
 						
 						result = db.getResults("SELECT Id FROM house");//execute select statement and return results
 						
@@ -840,14 +894,14 @@ public class ClientRequestThread extends Thread
 							result = db.getResults("SELECT Id, Street, Town, County, BuyOrRent FROM house WHERE Id="+searchID);//execute select statement and return results
 							result.next();//move to start of retrieved record
 							//Pass the data into house object
-							retreivedHouse.setId(Integer.parseInt(result.getString(1)));
-							retreivedHouse.setStreet(result.getString(2));
-							retreivedHouse.setTown(result.getString(3));
-							retreivedHouse.setCounty(result.getString(4));
-							retreivedHouse.setRentOrSale(result.getString(5).charAt(0));
+							house.setId(Integer.parseInt(result.getString(1)));
+							house.setStreet(result.getString(2));
+							house.setTown(result.getString(3));
+							house.setCounty(result.getString(4));
+							house.setRentOrSale(result.getString(5).charAt(0));
 							
 							server.sendMessage("1");						//send okay signal
-							server.sendHouseInformation(retreivedHouse);	//send the object
+							server.sendHouseInformation(house);	//send the object
 						}
 						else if(houseExists == false)//otherwise
 						{
@@ -863,12 +917,11 @@ public class ClientRequestThread extends Thread
 						rentHouseExists = false;
 						rentEstateAgentExists = false;
 						rentCustExists = false;
-						RentableHouse newHouseR = new RentableHouse();//rentable house object
 						agentID = server.getClientsSignal(); //gets agent id from client
 						custID = server.getClientsSignal(); //get customer id from client
-						newHouseR = server.getRentableHouseInformation(); //get rentable house from client
+						rHouse = server.getRentableHouseInformation(); //get rentable house from client
 						
-						result = db.getResults("SELECT BuyOrRent FROM house WHERE Id="+newHouseR.getId());//execute select statement and return results
+						result = db.getResults("SELECT BuyOrRent FROM house WHERE Id="+rHouse.getId());//execute select statement and return results
 						result.next();
 						if(result.getString(1).equalsIgnoreCase("r"))
 						{
@@ -903,8 +956,8 @@ public class ClientRequestThread extends Thread
 							rentCustExists = false;//customer does not exist
 						}
 						
-						startDateValid = dateValidator.isValidDate(newHouseR.getFromDate());
-						endDateValid = dateValidator.isValidDate(newHouseR.getToDate());
+						startDateValid = dateValidator.isValidDate(rHouse.getFromDate());
+						endDateValid = dateValidator.isValidDate(rHouse.getToDate());
 						if(startDateValid && endDateValid)
 						{
 							result = db.getResults("SELECT HouseID, StartDate, EndDate FROM renthouses");//execute select statement and return results
@@ -912,9 +965,9 @@ public class ClientRequestThread extends Thread
 							  do not overlap with rent dates for the house they want to rent.*/
 							while(result.next())
 							{
-								if(result.getString(1).equalsIgnoreCase(Integer.toString(newHouseR.getId())))
+								if(result.getString(1).equalsIgnoreCase(Integer.toString(rHouse.getId())))
 								{
-									noRentDateOverlap = dateValidator.noRentDateOverlapping(newHouseR.getFromDate(), newHouseR.getToDate(), 
+									noRentDateOverlap = dateValidator.noRentDateOverlapping(rHouse.getFromDate(), rHouse.getToDate(), 
 																		result.getString(2), result.getString(3));
 								}
 								else//otherwise we didnt find any transaction like this already
@@ -928,7 +981,7 @@ public class ClientRequestThread extends Thread
 							{
 								//execute insert query
 								db.executeStatement("INSERT INTO renthouses (HouseID, StartDate, EndDate, MonthlyRate, EstateAgentID, CustomerID) VALUES "
-										+ "('"+newHouseR.getId()+"', '"+newHouseR.getFromDate()+"', '"+newHouseR.getToDate()+"', '"+newHouseR.getRate()+"', '"+agentID+"', '"+custID+"')");
+										+ "('"+rHouse.getId()+"', '"+rHouse.getFromDate()+"', '"+rHouse.getToDate()+"', '"+rHouse.getRate()+"', '"+agentID+"', '"+custID+"')");
 								//send back okay message
 								server.sendMessage("1");
 							}
@@ -950,12 +1003,12 @@ public class ClientRequestThread extends Thread
 						buyHouseExists = false;
 						buyCustExists = false;
 						buyEstateAgentExists = false;
-						SellableHouse newHouseS = new SellableHouse();
+						sHouse = new SellableHouse();
 						agentID = server.getClientsSignal(); //gets agent id from client
 						custID = server.getClientsSignal(); //get customer id from client
-						newHouseS =  server.getSellableHouseInformation(); //get sellable house from client
+						sHouse =  server.getSellableHouseInformation(); //get sellable house from client
 						
-						result = db.getResults("SELECT BuyOrRent FROM house WHERE Id="+newHouseS.getId());//execute select statement and return results
+						result = db.getResults("SELECT BuyOrRent FROM house WHERE Id="+sHouse.getId());//execute select statement and return results
 						result.next();
 						if(result.getString(1).equalsIgnoreCase("b"))
 						{
@@ -995,7 +1048,7 @@ public class ClientRequestThread extends Thread
 						{
 							//do the appropriate insert and send success to client
 							db.executeStatement("INSERT INTO sellhouses (HouseID, Cost, EstateAgentID, CustomerID) VALUES "
-									+ "('"+newHouseS.getId()+"', '"+newHouseS.getCost()+"', '"+agentID+"', '"+custID+"')");
+									+ "('"+sHouse.getId()+"', '"+sHouse.getCost()+"', '"+agentID+"', '"+custID+"')");
 							server.sendMessage("1");
 						}
 						else//or
@@ -1006,7 +1059,7 @@ public class ClientRequestThread extends Thread
 						break;
 					case 29:
 						//SEARCHING FOR A PARTICULAR RENT TRANSACTION
-						RentableHouse findRentableHouse = new RentableHouse();//create object to hold the data
+						rHouse = new RentableHouse();//create object to hold the data
 						searchID = server.getSearchID();//get search id from the client
 						result = db.getResults("SELECT RentID FROM renthouses");//execute select statement and return results
 		
@@ -1036,16 +1089,16 @@ public class ClientRequestThread extends Thread
 							//Pass the data into staff member object
 							
 							//pass the data into the appropiate objects
-							findRentableHouse.setId(Integer.parseInt(result.getString(1)));
-							findRentableHouse.setFromDate(result.getString(2));
-							findRentableHouse.setToDate(result.getString(3));
-							findRentableHouse.setRate(Double.parseDouble(result.getString(4)));
+							rHouse.setId(Integer.parseInt(result.getString(1)));
+							rHouse.setFromDate(result.getString(2));
+							rHouse.setToDate(result.getString(3));
+							rHouse.setRate(Double.parseDouble(result.getString(4)));
 							agentID = Integer.parseInt(result.getString(5));
 							custID = Integer.parseInt(result.getString(6));
 							
 							//send them back to the client
 							server.sendMessage("1");						//send okay signal
-							server.sendRentableHouseInformation(findRentableHouse);
+							server.sendRentableHouseInformation(rHouse);
 							server.sendMessage(agentID);
 							server.sendMessage(custID);
 						}
@@ -1063,13 +1116,13 @@ public class ClientRequestThread extends Thread
 						rentHouseExists = false;
 						rentEstateAgentExists = false;
 						rentCustExists = false;
-						RentableHouse updateHouseR = new RentableHouse();//rent house object
+						rHouse = new RentableHouse();//rent house object
 						searchID = server.getClientsSignal(); //gets transaction id from client 
-						updateHouseR = server.getRentableHouseInformation(); //get rentable house from client
+						rHouse = server.getRentableHouseInformation(); //get rentable house from client
 						agentID = server.getClientsSignal(); //gets agent id from client
 						custID = server.getClientsSignal(); //get customer id from client
 						
-						result = db.getResults("SELECT BuyOrRent FROM house WHERE Id="+updateHouseR.getId());//execute select statement and return results
+						result = db.getResults("SELECT BuyOrRent FROM house WHERE Id="+rHouse.getId());//execute select statement and return results
 						result.next();
 						if(result.getString(1).equalsIgnoreCase("r"))
 						{
@@ -1106,8 +1159,8 @@ public class ClientRequestThread extends Thread
 						}
 						
 						//validating the dates entered by the user
-						startDateValid = dateValidator.isValidDate(updateHouseR.getFromDate());
-						endDateValid = dateValidator.isValidDate(updateHouseR.getToDate());
+						startDateValid = dateValidator.isValidDate(rHouse.getFromDate());
+						endDateValid = dateValidator.isValidDate(rHouse.getToDate());
 						
 						//if they are both valid dates
 						if(startDateValid && endDateValid)
@@ -1118,10 +1171,10 @@ public class ClientRequestThread extends Thread
 							while(result.next())
 							{
 								//if we find a rent transaction
-								if(result.getString(1).equalsIgnoreCase(Integer.toString(updateHouseR.getId())))
+								if(result.getString(1).equalsIgnoreCase(Integer.toString(rHouse.getId())))
 								{
 									//check for overlap
-									noRentDateOverlap = dateValidator.noRentDateOverlapping(updateHouseR.getFromDate(), updateHouseR.getToDate(), 
+									noRentDateOverlap = dateValidator.noRentDateOverlapping(rHouse.getFromDate(), rHouse.getToDate(), 
 																		result.getString(2), result.getString(3));
 								}
 								else//otherwise
@@ -1135,8 +1188,8 @@ public class ClientRequestThread extends Thread
 							if(rentHouseExists && rentEstateAgentExists && rentCustExists && noRentDateOverlap)
 							{
 								//execute the statement to update rent house transaction and send okay signal
-								db.executeStatement("UPDATE renthouses SET HouseID = '" +updateHouseR.getId()+ "', StartDate = '" +updateHouseR.getFromDate()+ "', "
-										+ "EndDate = '" +updateHouseR.getToDate()+ "', MonthlyRate = '" +updateHouseR.getRate()+ "', EstateAgentID = '" +agentID+ "', CustomerID = '" +custID
+								db.executeStatement("UPDATE renthouses SET HouseID = '" +rHouse.getId()+ "', StartDate = '" +rHouse.getFromDate()+ "', "
+										+ "EndDate = '" +rHouse.getToDate()+ "', MonthlyRate = '" +rHouse.getRate()+ "', EstateAgentID = '" +agentID+ "', CustomerID = '" +custID
 										+ "' WHERE RentID = '" +searchID+"'");//execute select statement and return results
 								server.sendMessage("1");
 							}
@@ -1155,7 +1208,7 @@ public class ClientRequestThread extends Thread
 					case 31:
 						//SEARCH FOR A PARTICULAR BUY TRANSACTION (SERVER SIDE)
 						sellTransactionExists = false;//makes sure transaction sell exists
-						SellableHouse findSellableHouse = new SellableHouse();//create object to hold the data
+						sHouse = new SellableHouse();//create object to hold the data
 						searchID = server.getSearchID();//get search id from the client
 						result = db.getResults("SELECT BuyID FROM sellhouses");//execute select statement and return results
 		
@@ -1182,13 +1235,13 @@ public class ClientRequestThread extends Thread
 							result.next();//move to start of retrieved record
 							//Pass the data into sell house object with two variables for customer & agent id
 							
-							findSellableHouse.setId(Integer.parseInt(result.getString(1)));
-							findSellableHouse.setCost(Double.parseDouble(result.getString(2)));
+							sHouse.setId(Integer.parseInt(result.getString(1)));
+							sHouse.setCost(Double.parseDouble(result.getString(2)));
 							agentID = Integer.parseInt(result.getString(3));
 							custID = Integer.parseInt(result.getString(4));
 							
 							server.sendMessage("1");						//send okay signal
-							server.sendSellableHouseInformation(findSellableHouse);
+							server.sendSellableHouseInformation(sHouse);
 							server.sendMessage(agentID);
 							server.sendMessage(custID);
 						}
@@ -1203,13 +1256,13 @@ public class ClientRequestThread extends Thread
 						buyHouseExists = false;
 						buyCustExists = false;
 						buyEstateAgentExists = false;
-						SellableHouse updateHouseS = new SellableHouse(); //sellable house object
+						sHouse = new SellableHouse(); //sellable house object
 						searchID = server.getClientsSignal(); //gets transaction id from client 
-						updateHouseS =  server.getSellableHouseInformation(); //get sellable house from client
+						sHouse =  server.getSellableHouseInformation(); //get sellable house from client
 						agentID = server.getClientsSignal(); //gets agent id from client
 						custID = server.getClientsSignal(); //get customer id from client
 						
-						result = db.getResults("SELECT BuyOrRent FROM house WHERE Id="+updateHouseS.getId());//execute select statement and return results
+						result = db.getResults("SELECT BuyOrRent FROM house WHERE Id="+sHouse.getId());//execute select statement and return results
 						result.next();
 						if(result.getString(1).equalsIgnoreCase("b"))
 						{
@@ -1248,7 +1301,7 @@ public class ClientRequestThread extends Thread
 						if(buyHouseExists && buyEstateAgentExists && buyCustExists)
 						{
 							//execute the statement
-							db.executeStatement("UPDATE sellhouses SET HouseID = '" +updateHouseS.getId()+ "', Cost = '" +updateHouseS.getCost()+ "', "
+							db.executeStatement("UPDATE sellhouses SET HouseID = '" +sHouse.getId()+ "', Cost = '" +sHouse.getCost()+ "', "
 									+ "EstateAgentID = '" +agentID+ "', CustomerID = '" +custID
 									+ "' WHERE BuyID = '" +searchID+"'");//execute select statement and return results
 							server.sendMessage("1");//send okay signal to client
@@ -1337,17 +1390,17 @@ public class ClientRequestThread extends Thread
 						//added to a list and int array lists for several different ids
 						while(result.next())
 						{
-							RentableHouse rListMember = new RentableHouse();
+							rHouse = new RentableHouse();
 							
 							rentIDs.add(Integer.parseInt(result.getString(1)));
-							rListMember.setId(Integer.parseInt(result.getString(2)));
-							rListMember.setFromDate(result.getString(3));
-							rListMember.setToDate(result.getString(4));
-							rListMember.setRate(Double.parseDouble(result.getString(5)));
+							rHouse.setId(Integer.parseInt(result.getString(2)));
+							rHouse.setFromDate(result.getString(3));
+							rHouse.setToDate(result.getString(4));
+							rHouse.setRate(Double.parseDouble(result.getString(5)));
 							estateAgentIDs.add(Integer.parseInt(result.getString(6)));
 							custIDs.add(Integer.parseInt(result.getString(7)));
 							
-							rHouses.add(rListMember);//add to list
+							rHouses.add(rHouse);//add to list
 						}
 						
 						server.sendMessage(rentIDs);//send an array list of rent ids to the client
@@ -1358,7 +1411,7 @@ public class ClientRequestThread extends Thread
 					case 36:
 						//SEARCH FOR A RENT TRANSACTION (SERVER SIDE)
 						searchID = server.getSearchID();				   //Get search id from client
-						RentableHouse retreivedRHouse = new RentableHouse();  //object to hold found rent house
+						rHouse = new RentableHouse();  //object to hold found rent house
 						
 						result = db.getResults("SELECT RentID FROM renthouses");//execute select statement and return results
 						
@@ -1386,16 +1439,16 @@ public class ClientRequestThread extends Thread
 							result.next();//move to start of retrieved record
 							//Pass the data into house object
 							int rentID = Integer.parseInt(result.getString(1));
-							retreivedRHouse.setId(Integer.parseInt(result.getString(2)));
-							retreivedRHouse.setFromDate(result.getString(3));
-							retreivedRHouse.setToDate(result.getString(4));
-							retreivedRHouse.setRate(Double.parseDouble(result.getString(5)));
+							rHouse.setId(Integer.parseInt(result.getString(2)));
+							rHouse.setFromDate(result.getString(3));
+							rHouse.setToDate(result.getString(4));
+							rHouse.setRate(Double.parseDouble(result.getString(5)));
 							int estateAgentID = Integer.parseInt(result.getString(6));
 							int custID = Integer.parseInt(result.getString(7));
 							
 							server.sendMessage("1");						//send okay signal
 							server.sendMessage(rentID);
-							server.sendRentableHouseInformation(retreivedRHouse);	//send the object
+							server.sendRentableHouseInformation(rHouse);	//send the object
 							server.sendMessage(estateAgentID);
 							server.sendMessage(custID);
 						}
@@ -1417,14 +1470,14 @@ public class ClientRequestThread extends Thread
 						//added to a list
 						while(result.next())
 						{
-							SellableHouse sListMember = new SellableHouse();
+							sHouse = new SellableHouse();
 							
 							buyIDs.add(Integer.parseInt(result.getString(1)));
-							sListMember.setId(Integer.parseInt(result.getString(2)));
-							sListMember.setCost(Double.parseDouble(result.getString(3)));
+							sHouse.setId(Integer.parseInt(result.getString(2)));
+							sHouse.setCost(Double.parseDouble(result.getString(3)));
 							estateAgentIDs.add(Integer.parseInt(result.getString(4)));
 							custIDs.add(Integer.parseInt(result.getString(5)));
-							sHouses.add(sListMember);//add to list
+							sHouses.add(sHouse);//add to list
 						}
 						
 						server.sendMessage(buyIDs);//send an array list of rent ids to the client
@@ -1435,7 +1488,7 @@ public class ClientRequestThread extends Thread
 					case 38:
 						//SEARCH FOR A BUY TRANSACTION (SERVER SIDE)
 						searchID = server.getSearchID();				   //Get search id from client
-						SellableHouse retreivedSHouse = new SellableHouse();  //object to hold found house
+						sHouse = new SellableHouse();  //object to hold found house
 						
 						result = db.getResults("SELECT BuyID FROM sellhouses");//execute select statement and return results
 						
@@ -1462,14 +1515,14 @@ public class ClientRequestThread extends Thread
 							result.next();//move to start of retrieved record
 							//Pass the data into house object
 							int buyID = Integer.parseInt(result.getString(1));
-							retreivedSHouse.setId(Integer.parseInt(result.getString(2)));
-							retreivedSHouse.setCost(Double.parseDouble(result.getString(3)));
+							sHouse.setId(Integer.parseInt(result.getString(2)));
+							sHouse.setCost(Double.parseDouble(result.getString(3)));
 							int estateAgentID = Integer.parseInt(result.getString(4));
 							int custID = Integer.parseInt(result.getString(5));
 							
 							server.sendMessage("1");						//send okay signal
 							server.sendMessage(buyID);
-							server.sendSellableHouseInformation(retreivedSHouse);	//send the object
+							server.sendSellableHouseInformation(sHouse);	//send the object
 							server.sendMessage(estateAgentID);
 							server.sendMessage(custID);
 						}
@@ -1480,7 +1533,7 @@ public class ClientRequestThread extends Thread
 						break;
 					case 39:
 						//CREATING A CUSTOMER (SERVER SIDE)
-						Customer customer = server.getCustomerInformation();       //Get user object from the client
+						customer = server.getCustomerInformation();       //Get user object from the client
 						
 						//Make sure user has entered information into the fields provided
 						if(customer.getfName().length() == 0 || customer.getlName().length() == 0 
@@ -1531,7 +1584,7 @@ public class ClientRequestThread extends Thread
 						break;
 					case 41:
 						//FINDING A CUSTOMER (SERVER SIDE)
-						Customer findCustomer = new Customer();//create object to hold the data
+						customer = new Customer();//create object to hold the data
 						searchID = server.getSearchID();//get search id from the client
 						result = db.getResults("SELECT CustomerID, FirstName, LastName, Address FROM customer");//execute select statement and return results
 						
@@ -1542,9 +1595,9 @@ public class ClientRequestThread extends Thread
 					    	//If we get a complete match we know this customer exists
 							if(result.getString(1).equalsIgnoreCase(Integer.toString(searchID)))
 							{
-								findCustomer.setfName(result.getString(2));
-								findCustomer.setlName(result.getString(3));
-								findCustomer.setAddress(result.getString(4));
+								customer.setfName(result.getString(2));
+								customer.setlName(result.getString(3));
+								customer.setAddress(result.getString(4));
 								
 								foundCustomer = true; //If the we can send back customer information
 								break;			   //break the loop
@@ -1558,7 +1611,7 @@ public class ClientRequestThread extends Thread
 					    if(foundCustomer == true)//if we found a customer
 					    {
 					    	server.sendMessage("1");					//send okay signal
-					    	server.sendCustomerInformation(findCustomer);
+					    	server.sendCustomerInformation(customer);
 					    }
 					    else if(foundCustomer == false)//otherwise
 					    {
@@ -1567,13 +1620,13 @@ public class ClientRequestThread extends Thread
 						break;
 					case 42:
 						//UPDATING CUSTOMER(SERVER SIDE)
-						Customer updateCustomer = new Customer();//customer object
+						customer = new Customer();//customer object
 						searchID = server.getSearchID();//get search id from client
-						updateCustomer = server.getCustomerInformation(); //get customer object from client
+						customer = server.getCustomerInformation(); //get customer object from client
 				
 						//execute the statement
-						db.executeStatement("UPDATE customer SET FirstName = '" +updateCustomer.getfName()+ "', LastName = '" +updateCustomer.getlName()+ "', "
-								+ "Address = '" +updateCustomer.getAddress()+ 
+						db.executeStatement("UPDATE customer SET FirstName = '" +customer.getfName()+ "', LastName = '" +customer.getlName()+ "', "
+								+ "Address = '" +customer.getAddress()+ 
 								"' WHERE CustomerID = '" +searchID+"'");//execute select statement and return results
 					
 					    //send okay signal
@@ -1588,21 +1641,21 @@ public class ClientRequestThread extends Thread
 						//added to a list
 						while(result.next())
 						{
-							Customer customerMember = new Customer();
+							customer = new Customer();
 							
-							customerMember.setCustID(Integer.parseInt(result.getString(1)));
-							customerMember.setfName(result.getString(2));
-							customerMember.setlName(result.getString(3));
-							customerMember.setAddress(result.getString(4));
+							customer.setCustID(Integer.parseInt(result.getString(1)));
+							customer.setfName(result.getString(2));
+							customer.setlName(result.getString(3));
+							customer.setAddress(result.getString(4));
 						
-							customers.add(customerMember);//add to list
+							customers.add(customer);//add to list
 						}
 						
 						server.sendMessage(customers);//send back the array list of customers to the client
 						break;
 					case 44:
 						//SEARCH FOR A PARTICULAR CUSTOMER
-						Customer retrieveCustomer = new Customer();//create object to hold the data
+						customer = new Customer();//create object to hold the data
 						searchID = server.getSearchID();//get search id from the client
 						result = db.getResults("SELECT CustomerID, FirstName, LastName, Address FROM customer");//execute select statement and return results
 						
@@ -1613,10 +1666,10 @@ public class ClientRequestThread extends Thread
 					    	//If we get a complete match we know this customer exists
 							if(result.getString(1).equalsIgnoreCase(Integer.toString(searchID)))
 							{
-								retrieveCustomer.setCustID(Integer.parseInt(result.getString(1)));
-								retrieveCustomer.setfName(result.getString(2));
-								retrieveCustomer.setlName(result.getString(3));
-								retrieveCustomer.setAddress(result.getString(4));
+								customer.setCustID(Integer.parseInt(result.getString(1)));
+								customer.setfName(result.getString(2));
+								customer.setlName(result.getString(3));
+								customer.setAddress(result.getString(4));
 								
 								foundViewCust = true; //If the we can send back customer information
 								break;			   //break the loop
@@ -1630,7 +1683,7 @@ public class ClientRequestThread extends Thread
 					    if(foundViewCust == true)//if we found a customer
 					    {
 					    	server.sendMessage("1");					//send okay signal
-					    	server.sendCustomerInformation(retrieveCustomer);
+					    	server.sendCustomerInformation(customer);
 					    }
 					    else if(foundViewCust == false)//otherwise
 					    {
@@ -1639,178 +1692,312 @@ public class ClientRequestThread extends Thread
 						break;
 					case 45:
 						//CREATING A NEW REMINDER
-						Reminder newReminder = server.getReminderInformation();//get reminder object from the client
+						reminder = server.getReminderInformation();//get reminder object from the client
 						reminderDateValid = false;
 						reminderTimeValid = false;
-						reminderDateValid = dateValidator.isValidDate(newReminder.getDate());
-						reminderTimeValid = timeValidator.validateTime(newReminder.getTime());
+						reminderDateValid = dateValidator.isValidDate(reminder.getDate());//make sure that and time are valid dates and times
+						reminderTimeValid = timeValidator.validateTime(reminder.getTime());
+						String subject = reminder.getSubject();
+						isWhitespace = subject.contains(" ");//subject can only be one word
 						
-						if(reminderDateValid == true && reminderTimeValid == true)
+						//if date and time are valid and subject is one word
+						if(reminderDateValid == true && reminderTimeValid == true && isWhitespace == false)
 						{
-							//Execute query that will insert new reminder
-							//this method will throw an exception and signal client if not valid
-						    db.executeStatement("INSERT INTO reminder (Subject, Description, Date, Time) VALUES "
-									+ "('"+newReminder.getSubject()+"', '"+newReminder.getDesc()+"', '"+newReminder.getDate()+"', '"+newReminder.getTime()+"')");
-					    
+							int rows = 0;//open the reminder file for reading
+							fileReader = new Scanner(new FileReader(serversFilePath + "/" + username + "/Reminder.txt"));
+
+							while(fileReader.hasNextLine()) //count how many rows we have in the file
+							{                                
+								fileReader.nextLine(); //advance the inputstream
+								++rows;
+							}
+
+							File file = new File(serversFilePath + "/" + username + "/Reminder.txt");//create file object
+							//true = append file
+				    		FileWriter fileWriter = new FileWriter(file ,true);//creater writer for file appending
+				    		BufferedWriter bufferWriter = new BufferedWriter(fileWriter);
+				    		String formatStr = "%-4d %-25s %-10s %-5s %-100s%n";///format string then append data
+				    		bufferWriter.write(String.format(formatStr, ++rows, reminder.getSubject(), reminder.getDate(), reminder.getTime(), reminder.getDesc()));
+							
+							bufferWriter.close();//close read and writes to the file
+							fileReader.close();
+							
 							server.sendMessage("1");//send okay signal
 						}
-						else
+						else//if validation fails
 						{
-							server.sendMessage("0");
+							server.sendMessage("0");//not okay
 						}
 						break;
 					case 46:
 						//FINDING A REMINDER (SERVER SIDE)
-						Reminder findReminder = new Reminder();//create object to hold the data
+						reminder = new Reminder();//create object to hold the data
 						searchID = server.getSearchID();//get search id from the client
-						result = db.getResults("SELECT ReminderID, Subject, Description, Date, Time FROM reminder");//execute select statement and return results
 						
-					    /*Loop over the results and see if anything matches the search id information sent
-						  from the client*/
-					   while(result.next())
+						//open file for reading
+						fileReader = new Scanner(new FileReader(serversFilePath + "/" + username + "/Reminder.txt"));
+						
+						while(fileReader.hasNext())//loop over rows
 						{
-					    	//If we get a complete match we know this customer exists
-							if(result.getString(1).equalsIgnoreCase(Integer.toString(searchID)))
+							reminder.setReminderID(fileReader.nextInt());
+							reminder.setSubject(fileReader.next());
+							reminder.setDate(fileReader.next());
+							reminder.setTime(fileReader.next());
+							String[] words = fileReader.nextLine().split("\\s");
+							String desc = "";
+							for(int i = 0; i < words.length; ++i)
 							{
-								findReminder.setSubject(result.getString(2));
-								findReminder.setDesc(result.getString(3));
-								findReminder.setDate(result.getString(4));
-								findReminder.setTime(result.getString(5));
-								
+								desc += words[i]+" ";
+							}
+							reminder.setDesc(desc);
+							
+							if(reminder.getReminderID() == searchID)//if one of the rows matchs the id
+							{						
 								foundReminder = true; //If the we can send back reminder information
 								break;			   //break the loop
 							}
-							else //otherwise
+							else
 							{
 								foundReminder = false; //we have not found a match and we cannot do an update
 							}
 						}
-					    
-					    if(foundReminder == true)//if we found a customer
+						
+						if(foundReminder == true && isWhitespace == false)//if we found a reminder
 					    {
 					    	server.sendMessage("1");					//send okay signal
-					    	server.sendReminderInformation(findReminder);
+					    	server.sendReminderInformation(reminder);	//send the reminder data
 					    }
-					    else if(foundReminder == false)//otherwise
+					    else if(foundReminder == false || isWhitespace == true)//otherwise
 					    {
 					    	server.sendMessage("0"); //send not okay signal
 					    }
+						
+						fileReader.close();//close the file reader
 						break;
 					case 47:
 						//UPDATING A REMINDER (SERVER SIDE)
 						searchID = server.getSearchID();//get search id from client
-						Reminder updateReminder = server.getReminderInformation(); //get reminder object from client
-						
-						//here we do some validation on the updated date and time
+						reminder = server.getReminderInformation(); //get reminder object from client
+						reminderList = new ArrayList<Reminder>();	//holds list of reminders from the file
+
 						reminderDateValid = false;
 						reminderTimeValid = false;
-						reminderDateValid = dateValidator.isValidDate(updateReminder.getDate());
-						reminderTimeValid = timeValidator.validateTime(updateReminder.getTime());
-						
-						//if the updated date and time are valid
+						reminderDateValid = dateValidator.isValidDate(reminder.getDate());//validate date
+						reminderTimeValid = timeValidator.validateTime(reminder.getTime());//validate time
+
+						//if date/time are valid
 						if(reminderDateValid == true && reminderTimeValid == true)
 						{
-							//execute the statement
-							db.executeStatement("UPDATE reminder SET Subject = '" +updateReminder.getSubject()+ "', Description = '" +updateReminder.getDesc()+ "', "
-									+ "Date = '" +updateReminder.getDate()+ "', Time = '" +updateReminder.getTime()+
-									"' WHERE ReminderID = '" +searchID+"'");//execute select statement and return results
-						
-						    //send okay signal
+							//open file for reading
+							fileReader = new Scanner(new FileReader(serversFilePath + "/" + username + "/Reminder.txt"));
+
+							while(fileReader.hasNext())//loop over rows
+							{
+								rListMember = new Reminder();
+								
+								rListMember.setReminderID(fileReader.nextInt());
+								rListMember.setSubject(fileReader.next());
+								rListMember.setDate(fileReader.next());
+								rListMember.setTime(fileReader.next());
+								String[] words = fileReader.nextLine().split("\\s");
+								String desc = "";
+								for(int i = 0; i < words.length; ++i)
+								{
+									desc += words[i]+" ";
+								}
+								rListMember.setDesc(desc);
+								
+								if(rListMember.getReminderID() == searchID)//if we find the correct id
+								{						
+									rListMember.setSubject(reminder.getSubject());//we set its data todata sent from client
+									rListMember.setDate(reminder.getDate());
+									rListMember.setTime(reminder.getTime());
+									rListMember.setDesc(reminder.getDesc());
+									
+									reminderList.add(rListMember);//add to list
+									continue;			   	  //move to next interation of the loop
+								}
+								
+								reminderList.add(rListMember);//add to list if no id found
+							}//end read while loop
+							
+							fileReader.close();//close reader
+
+							//open file for writing
+							fileWriter = new PrintWriter(serversFilePath + "/" + username + "/Reminder.txt");
+							int size = reminderList.size();///get lists size, holds all data from the file
+							int count = 0;
+							
+							while(count < size)//loop list size amount times
+							{
+								rListMember = new Reminder();
+								rListMember = reminderList.get(count);
+								
+								//write list containing updated data to the file
+								fileWriter.printf("%-4d %-25s %-10s %-5s %-100s%n",
+										rListMember.getReminderID(), rListMember.getSubject(), rListMember.getDate(), rListMember.getTime(), rListMember.getDesc());
+							
+								++count;
+							}//end write file loop
+							
+							fileWriter.close();//close file writer
+					
+							//send okay signal
 						    server.sendMessage("1");
 						}
 						else
 						{
+							//send unsuccessful signal
 							server.sendMessage("0");
 						}
 						break;
 					case 48:
 						//DELETING A REMINDER (SERVER SIDE)
-						searchID = server.getSearchID();
-						result = db.getResults("SELECT ReminderID FROM reminder");//execute select statement and return results
-						
-						/*Loop over the results and see if any match the reminder for deletion sent
-						  from the client*/
-						while(result.next())
+						searchID = server.getSearchID();//get search id from client
+						reminderList = new ArrayList<Reminder>();//hold all rows from file
+
+						//open file reader
+						fileReader = new Scanner(new FileReader(serversFilePath + "/" + username + "/Reminder.txt"));
+
+						while(fileReader.hasNext())//loop over file rows
 						{
-							if(result.getString(1).equalsIgnoreCase(Integer.toString(searchID)))
+							rListMember = new Reminder();//object
+							
+							rListMember.setReminderID(fileReader.nextInt());//pass data to object
+							rListMember.setSubject(fileReader.next());
+							rListMember.setDate(fileReader.next());
+							rListMember.setTime(fileReader.next());
+							String[] words = fileReader.nextLine().split("\\s");//multi word desc passed into array
+							String desc = "";
+							for(int i = 0; i < words.length; ++i)
 							{
-								//if we find a match it means we have a customer with this id
-								reminderDelete = true; //delete is now allowed
-								break;	
+								desc += words[i]+" ";//create string from array of words
 							}
-							else
+							rListMember.setDesc(desc);
+							
+							if(rListMember.getReminderID() == searchID)//if we find correct id
+							{						
+								rListMember.setReminderID(0);//set deleted data
+								rListMember.setSubject("Deleted");
+								rListMember.setDate("Deleted");
+								rListMember.setTime("Deleted");
+								rListMember.setDesc("Deleted");
+								reminderList.add(rListMember);//add to list
+							}
+							else if(rListMember.getReminderID() != searchID)//otherwise just add the data to the list
 							{
-								reminderDelete = false;//delete not allowed
+								reminderList.add(rListMember);
 							}
-						}
-					    
-						if(reminderDelete == true)//if delete is allowed
-					    {
-						    db.executeStatement("DELETE FROM reminder WHERE ReminderID ="+searchID);
-						    server.sendMessage("1");//send okay signal
-					    }
-					    else if(custDelete == false)//otherwise
-					    {
-					    	server.sendMessage("0");//send not okay signal
-					    }
+						}//end read while loop
+						
+						fileReader.close();//close reader
+
+						//open writer
+						fileWriter = new PrintWriter(serversFilePath + "/" + username + "/Reminder.txt");
+						int size = reminderList.size();//get list size
+						int count = 0;
+						
+						while(count < size)//loop list size times
+						{
+							rListMember = new Reminder();
+							rListMember = reminderList.get(count);//get each member from list
+							
+							//write updated data to the file
+							fileWriter.printf("%-4d %-25s %-10s %-5s %-100s%n",
+									rListMember.getReminderID(), rListMember.getSubject(), rListMember.getDate(), rListMember.getTime(), rListMember.getDesc().trim());
+						
+							++count;
+						}//end write file loop
+						
+						fileWriter.close();//close writer
+				
+						//send okay signal
+					    server.sendMessage("1");
 					    break;
 					case 49:
 						//GET TODAYS REMINDERS (SERVER SIDE)
 						remindersList = new ArrayList<Reminder>();//list to hold all found reminders
 						String todaysDate = server.getClientMessage();//get todays date sent from the client
-						result = db.getResults("SELECT ReminderID, Subject, Description, Date, Time FROM reminder");//execute select statement and return results
 						
-						/*Loop over the results and see if any match the reminder for retrieval sent
-						  from the client*/
-						while(result.next())
+						//open file for reading
+						fileReader = new Scanner(new FileReader(serversFilePath + "/" + username + "/Reminder.txt"));
+							
+						while(fileReader.hasNext())///loop over file rows
 						{
-							if(result.getString(4).equalsIgnoreCase(todaysDate))
+							rListMember = new Reminder();
+								
+							rListMember.setReminderID(fileReader.nextInt());//get data 
+							rListMember.setSubject(fileReader.next());
+							rListMember.setDate(fileReader.next());
+							rListMember.setTime(fileReader.next());
+							String[] words = fileReader.nextLine().split("\\s");
+							String desc = "";
+							for(int i = 0; i < words.length; ++i)
 							{
-								Reminder todo = new Reminder();
-								
-								todo.setReminderID(Integer.parseInt(result.getString(1)));
-								todo.setSubject(result.getString(2));
-								todo.setDesc(result.getString(3));
-								todo.setDate(result.getString(4));
-								todo.setTime(result.getString(5));
-								
-								remindersList.add(todo);
+								desc += words[i]+" ";
 							}
-						}
-						
+							rListMember.setDesc(desc);
+								
+							if(rListMember.getDate().equals(todaysDate))//if data matchs, add object to list
+							{						
+								remindersList.add(rListMember);
+							}
+							else//otherwise move to next iteration
+							{
+								continue;
+							}
+						}//end read while loop
+							
+						fileReader.close();//close reader
+							
 						server.sendMessage(remindersList);
 						break;
 					case 50:
 						//GET REMINDERS FOR A CERTAIN DATE (SERVER SIDE)
-						//GET TODAYS REMINDERS (SERVER SIDE)
 						remindersList = new ArrayList<Reminder>();//list to hold all found reminders
-						String date = server.getClientMessage();//get search date sent from the client
+						String date = server.getClientMessage();//get todays date sent from the client
 						
-						validSearchDate = dateValidator.isValidDate(date);//makes sure date sent from client is a valid date
+						validSearchDate = dateValidator.isValidDate(date);//makes sure date sent from client is
 						
-						if(validSearchDate == true)//if the date for the search is valid
+						if(validSearchDate == true)//if date is valid search date
 						{
-							result = db.getResults("SELECT ReminderID, Subject, Description, Date, Time FROM reminder");//execute select statement and return results
+							//open file for reading
+							fileReader = new Scanner(new FileReader(serversFilePath + "/" + username + "/Reminder.txt"));
 							
-							/*Loop over the results and see if any match the reminder for retrieval sent
-							  from the client*/
-							while(result.next())
+							while(fileReader.hasNext())//loop over file rows
 							{
-								if(result.getString(4).equalsIgnoreCase(date))//if the date matchs
+								rListMember = new Reminder();//object
+								
+								rListMember.setReminderID(fileReader.nextInt());//get data and add to object
+								rListMember.setSubject(fileReader.next());
+								rListMember.setDate(fileReader.next());
+								rListMember.setTime(fileReader.next());
+								String[] words = fileReader.nextLine().split("\\s");//if desc has more than one word split and add to array
+								String desc = "";
+								for(int i = 0; i < words.length; ++i)
 								{
-									Reminder todo = new Reminder();//create object
-									
-									todo.setReminderID(Integer.parseInt(result.getString(1)));//give it the data
-									todo.setSubject(result.getString(2));
-									todo.setDesc(result.getString(3));
-									todo.setDate(result.getString(4));
-									todo.setTime(result.getString(5));
-									
-									remindersList.add(todo);//add object to the list
+									desc += words[i]+" ";//then create single string from array
 								}
-							}
+								rListMember.setDesc(desc);
+								
+								if(rListMember.getDate().equals(date))//if date matches search date
+								{						
+									remindersList.add(rListMember);//we can add object to the list
+								}
+								else//otherwise
+								{
+									continue;//next iteration
+								}
+							}//end read while loop
 							
-							server.sendMessage(remindersList);//send the list of reminders back to the server
+							fileReader.close();//close file reader
+							
+							server.sendMessage("1");//send okay signal
+							server.sendMessage(remindersList);//send list of found reminder objects
+						}
+						else//if search date isnt valid
+						{
+							server.sendMessage("0");//send not okay signal
 						}
 						break;
 					case 51:
@@ -1890,46 +2077,46 @@ public class ClientRequestThread extends Thread
 						break;
 					case 54:
 						//SEARCH FOR ALL RENTABLE HOUSES (SERVER SIDE)
-						sHouseType = server.getClientMessage();
+						houseType = server.getClientMessage();
 						houses = new ArrayList<House>();//array list to hold all houses
-						result = db.getResults("SELECT Id, Street, Town, County, BuyOrRent FROM house WHERE BuyOrRent='"+sHouseType+"'");//execute select statement and return results
+						result = db.getResults("SELECT Id, Street, Town, County, BuyOrRent FROM house WHERE BuyOrRent='"+houseType+"'");//execute select statement and return results
 						
 						//Loop over the results and add each houses data to an object which is then
 						//added to a list
 						while(result.next())
 						{
-							House listMember = new House();
+							house = new House();
 							
-							listMember.setId(Integer.parseInt(result.getString(1)));
-							listMember.setStreet(result.getString(2));
-							listMember.setTown(result.getString(3));
-							listMember.setCounty(result.getString(4));
-							listMember.setRentOrSale(result.getString(5).charAt(0));
+							house.setId(Integer.parseInt(result.getString(1)));
+							house.setStreet(result.getString(2));
+							house.setTown(result.getString(3));
+							house.setCounty(result.getString(4));
+							house.setRentOrSale(result.getString(5).charAt(0));
 							
-							houses.add(listMember);//add to list
+							houses.add(house);//add to list
 						}
 						
 						server.sendMessage(houses);//send back the array list of houses to the client
 						break;
 					case 55:
 						//SEARCH FOR ALL BUYABLE HOUSES (SERVER SIDE)
-						sHouseType = server.getClientMessage();
+						houseType = server.getClientMessage();
 						houses = new ArrayList<House>();//array list to hold all houses
-						result = db.getResults("SELECT Id, Street, Town, County, BuyOrRent FROM house WHERE BuyOrRent='"+sHouseType+"'");//execute select statement and return results
+						result = db.getResults("SELECT Id, Street, Town, County, BuyOrRent FROM house WHERE BuyOrRent='"+houseType+"'");//execute select statement and return results
 						
 						//Loop over the results and add each houses data to an object which is then
 						//added to a list
 						while(result.next())
 						{
-							House listMember = new House();
+							house = new House();
 							
-							listMember.setId(Integer.parseInt(result.getString(1)));
-							listMember.setStreet(result.getString(2));
-							listMember.setTown(result.getString(3));
-							listMember.setCounty(result.getString(4));
-							listMember.setRentOrSale(result.getString(5).charAt(0));
+							house.setId(Integer.parseInt(result.getString(1)));
+							house.setStreet(result.getString(2));
+							house.setTown(result.getString(3));
+							house.setCounty(result.getString(4));
+							house.setRentOrSale(result.getString(5).charAt(0));
 							
-							houses.add(listMember);//add to list
+							houses.add(house);//add to list
 						}
 						
 						server.sendMessage(houses);//send back the array list of houses to the client
@@ -1944,15 +2131,15 @@ public class ClientRequestThread extends Thread
 						//added to a list
 						while(result.next())
 						{
-							House listMember = new House();
+							house = new House();
 							
-							listMember.setId(Integer.parseInt(result.getString(1)));
-							listMember.setStreet(result.getString(2));
-							listMember.setTown(result.getString(3));
-							listMember.setCounty(result.getString(4));
-							listMember.setRentOrSale(result.getString(5).charAt(0));
+							house.setId(Integer.parseInt(result.getString(1)));
+							house.setStreet(result.getString(2));
+							house.setTown(result.getString(3));
+							house.setCounty(result.getString(4));
+							house.setRentOrSale(result.getString(5).charAt(0));
 							
-							houses.add(listMember);//add to list
+							houses.add(house);//add to list
 						}
 						
 						server.sendMessage(houses);//send back the array list of houses to the client
@@ -1967,15 +2154,15 @@ public class ClientRequestThread extends Thread
 						//added to a list
 						while(result.next())
 						{
-							House listMember = new House();
+							house = new House();
 							
-							listMember.setId(Integer.parseInt(result.getString(1)));
-							listMember.setStreet(result.getString(2));
-							listMember.setTown(result.getString(3));
-							listMember.setCounty(result.getString(4));
-							listMember.setRentOrSale(result.getString(5).charAt(0));
+							house.setId(Integer.parseInt(result.getString(1)));
+							house.setStreet(result.getString(2));
+							house.setTown(result.getString(3));
+							house.setCounty(result.getString(4));
+							house.setRentOrSale(result.getString(5).charAt(0));
 							
-							houses.add(listMember);//add to list
+							houses.add(house);//add to list
 						}
 						
 						server.sendMessage(houses);//send back the array list of houses to the client
@@ -1990,14 +2177,14 @@ public class ClientRequestThread extends Thread
 						//added to a list
 						while(result.next())
 						{
-							Customer c = new Customer();
+							customer = new Customer();
 							
-							c.setCustID(Integer.parseInt(result.getString(1)));
-							c.setfName(result.getString(2));
-							c.setlName(result.getString(3));
-							c.setAddress(result.getString(4));
+							customer.setCustID(Integer.parseInt(result.getString(1)));
+							customer.setfName(result.getString(2));
+							customer.setlName(result.getString(3));
+							customer.setAddress(result.getString(4));
 						
-							customers.add(c);//add to list
+							customers.add(customer);//add to list
 						}
 						
 						server.sendMessage(customers);//send back the array list of staff to the client
@@ -2012,14 +2199,14 @@ public class ClientRequestThread extends Thread
 						//added to a list
 						while(result.next())
 						{
-							Customer c = new Customer();
+							customer = new Customer();
 							
-							c.setCustID(Integer.parseInt(result.getString(1)));
-							c.setfName(result.getString(2));
-							c.setlName(result.getString(3));
-							c.setAddress(result.getString(4));
+							customer.setCustID(Integer.parseInt(result.getString(1)));
+							customer.setfName(result.getString(2));
+							customer.setlName(result.getString(3));
+							customer.setAddress(result.getString(4));
 						
-							customers.add(c);//add to list
+							customers.add(customer);//add to list
 						}
 						
 						server.sendMessage(customers);//send back the array list of staff to the client
@@ -2034,14 +2221,14 @@ public class ClientRequestThread extends Thread
 						//added to a list
 						while(result.next())
 						{
-							Customer c = new Customer();
+							customer = new Customer();
 							
-							c.setCustID(Integer.parseInt(result.getString(1)));
-							c.setfName(result.getString(2));
-							c.setlName(result.getString(3));
-							c.setAddress(result.getString(4));
+							customer.setCustID(Integer.parseInt(result.getString(1)));
+							customer.setfName(result.getString(2));
+							customer.setlName(result.getString(3));
+							customer.setAddress(result.getString(4));
 						
-							customers.add(c);//add to list
+							customers.add(customer);//add to list
 						}
 						
 						server.sendMessage(customers);//send back the array list of staff to the client
@@ -2063,20 +2250,20 @@ public class ClientRequestThread extends Thread
 						//added to lists
 						while(result.next())
 						{
-							SellableHouse sh = new SellableHouse();
-							House h = new House();
+							sHouse = new SellableHouse();
+							house = new House();
 							
-							sh.setId(Integer.parseInt(result.getString(1)));
-							h.setId(Integer.parseInt(result.getString(2)));
-							sh.setCost(Double.parseDouble(result.getString(3)));
+							sHouse.setId(Integer.parseInt(result.getString(1)));
+							house.setId(Integer.parseInt(result.getString(2)));
+							sHouse.setCost(Double.parseDouble(result.getString(3)));
 							estateAgentIDs.add(Integer.parseInt(result.getString(4)));
 							custIDs.add(Integer.parseInt(result.getString(5)));
-							h.setStreet(result.getString(6));
-							h.setTown(result.getString(7));
-							h.setCounty(result.getString(8));
+							house.setStreet(result.getString(6));
+							house.setTown(result.getString(7));
+							house.setCounty(result.getString(8));
 							
-							sHouses.add(sh);//add to list of sellable houses
-							houses.add(h);//add to list of houses
+							sHouses.add(sHouse);//add to list of sellable houses
+							houses.add(house);//add to list of houses
 						}
 						
 						server.sendMessage(sHouses);//send back the array list of sellable houses (trans) to the client
@@ -2090,7 +2277,7 @@ public class ClientRequestThread extends Thread
 						buyIDs = new ArrayList<Integer>();//array list to hold rent ids
 						estateAgentIDs = new  ArrayList<Integer>();//array list to hold estate agent ids
 						custIDs = new ArrayList<Integer>();//array list to hold customer ids
-						String operator = server.getClientMessage();
+						operator = server.getClientMessage();
 						String cost = server.getClientMessage();
 						result = db.getResults("SELECT BuyID, HouseID, Cost, EstateAgentID, CustomerID FROM sellhouses WHERE Cost "+operator+" "+cost);//execute select statement and return results
 						
@@ -2098,14 +2285,14 @@ public class ClientRequestThread extends Thread
 						//added to lists
 						while(result.next())
 						{
-							SellableHouse sListMember = new SellableHouse();
+							sHouse = new SellableHouse();
 							
 							buyIDs.add(Integer.parseInt(result.getString(1)));
-							sListMember.setId(Integer.parseInt(result.getString(2)));
-							sListMember.setCost(Double.parseDouble(result.getString(3)));
+							sHouse.setId(Integer.parseInt(result.getString(2)));
+							sHouse.setCost(Double.parseDouble(result.getString(3)));
 							estateAgentIDs.add(Integer.parseInt(result.getString(4)));
 							custIDs.add(Integer.parseInt(result.getString(5)));
-							sHouses.add(sListMember);//add to list
+							sHouses.add(sHouse);//add to list
 						}
 						
 						server.sendMessage(buyIDs);//send an array list of buy ids to the client
@@ -2131,20 +2318,20 @@ public class ClientRequestThread extends Thread
 						//added to a list
 						while(result.next())
 						{
-							SellableHouse sh = new SellableHouse();
-							Customer c = new Customer();
+							sHouse = new SellableHouse();
+							customer = new Customer();
 							
 							buyIDs.add(Integer.parseInt(result.getString(1)));
-							sh.setId(Integer.parseInt(result.getString(2)));
-							sh.setCost(Double.parseDouble(result.getString(3)));
+							sHouse.setId(Integer.parseInt(result.getString(2)));
+							sHouse.setCost(Double.parseDouble(result.getString(3)));
 							estateAgentIDs.add(Integer.parseInt(result.getString(4)));
-							c.setCustID(Integer.parseInt(result.getString(5)));
-							c.setfName(result.getString(6));
-							c.setlName(result.getString(7));
-							c.setAddress(result.getString(8));
+							customer.setCustID(Integer.parseInt(result.getString(5)));
+							customer.setfName(result.getString(6));
+							customer.setlName(result.getString(7));
+							customer.setAddress(result.getString(8));
 							
-							sHouses.add(sh);//add to list of sellable houses
-							customers.add(c);//add to list of associated customers
+							sHouses.add(sHouse);//add to list of sellable houses
+							customers.add(customer);//add to list of associated customers
 						}
 						
 						server.sendMessage(buyIDs);
@@ -2170,26 +2357,170 @@ public class ClientRequestThread extends Thread
 						//added to a list
 						while(result.next())
 						{
-							SellableHouse sh = new SellableHouse();
-							StaffMember sm = new StaffMember();
+							sHouse = new SellableHouse();
+							staff = new StaffMember();
 							
 							buyIDs.add(Integer.parseInt(result.getString(1)));
-							sh.setId(Integer.parseInt(result.getString(2)));
-							sh.setCost(Double.parseDouble(result.getString(3)));
+							sHouse.setId(Integer.parseInt(result.getString(2)));
+							sHouse.setCost(Double.parseDouble(result.getString(3)));
 							custIDs.add(Integer.parseInt(result.getString(4)));
-							sm.setId(Integer.parseInt(result.getString(5)));
-							sm.setFirstName(result.getString(6));
-							sm.setLastName(result.getString(7));
-							sm.setAddress(result.getString(8));
+							staff.setId(Integer.parseInt(result.getString(5)));
+							staff.setFirstName(result.getString(6));
+							staff.setLastName(result.getString(7));
+							staff.setAddress(result.getString(8));
 							
 							
-							sHouses.add(sh);//add to list of sellable houses
-							staffMembers.add(sm);//add to list of associated estate agent (staff member)
+							sHouses.add(sHouse);//add to list of sellable houses
+							staffMembers.add(staff);//add to list of associated estate agent (staff member)
 						}
 						
 						server.sendMessage(buyIDs);//send list of buy ids
 						server.sendMessage(sHouses);//send back the array list of sellable houses (trans) to the client
 						server.sendMessage(custIDs);//send back the array list of customer ids to the client
+						server.sendMessage(staffMembers);//send back the array list of staff members
+						break;
+					case 65:
+						//SEARCH FOR RENT TRANSACTIONS IN A CERTAIN COUNTY (SERVER SIDE)
+						rHouses = new ArrayList<RentableHouse>();//list to hold sellable house objects(data)
+						houses = new ArrayList<House>();//list to hold house objects(data)
+						county = server.getClientMessage();//get search county sent from the client
+						//example using joins in the sql queries
+						result = db.getResults("SELECT renthouses.RentID, renthouses.StartDate, renthouses.EndDate, renthouses.MonthlyRate, renthouses.HouseID, house.Street, house.Town, house.County"+
+												" FROM renthouses"+
+												" INNER JOIN house"+
+												" ON house.County='"+county+"' AND house.Id = renthouses.HouseID;");//execute select statement and return results
+						
+						//Loop over the results and add data to objects which are then
+						//added to lists
+						while(result.next())
+						{
+							rHouse = new RentableHouse();
+							house = new House();
+							
+							rHouse.setId(Integer.parseInt(result.getString(1)));
+							rHouse.setFromDate(result.getString(2));
+							rHouse.setToDate(result.getString(3));
+							rHouse.setRate(Double.parseDouble(result.getString(4)));
+							house.setId(Integer.parseInt(result.getString(5)));
+							house.setStreet(result.getString(6));
+							house.setTown(result.getString(7));
+							house.setCounty(result.getString(8));
+							
+							rHouses.add(rHouse);//add to list of sellable houses
+							houses.add(house);//add to list of houses
+						}
+						
+						server.sendMessage(rHouses);//send back the array list of sellable houses (trans) to the client
+						server.sendMessage(houses);//send back the array list of houses to the client
+						break;
+					case 66:
+						//SEARCH FOR RENT TRANSACTIONS BY COST (>, <, =) (SERVER SIDE)
+						rHouses = new ArrayList<RentableHouse>();//list to hold rentable house objects(data)
+						rentIDs = new ArrayList<Integer>();//array list to hold rent ids
+						estateAgentIDs = new  ArrayList<Integer>();//array list to hold estate agent ids
+						custIDs = new ArrayList<Integer>();//array list to hold customer ids
+						operator = server.getClientMessage();
+						String rate = server.getClientMessage();
+						result = db.getResults("SELECT RentID, HouseID, StartDate, EndDate, MonthlyRate, EstateAgentID, CustomerID FROM renthouses WHERE MonthlyRate "+operator+" "+rate);//execute select statement and return results
+						
+						//Loop over the results and add data to objects which are then
+						//added to lists
+						while(result.next())
+						{
+							rHouse = new RentableHouse();
+							
+							rentIDs.add(Integer.parseInt(result.getString(1)));
+							rHouse.setId(Integer.parseInt(result.getString(2)));
+							rHouse.setFromDate(result.getString(3));
+							rHouse.setToDate(result.getString(4));
+							rHouse.setRate(Double.parseDouble(result.getString(5)));
+							estateAgentIDs.add(Integer.parseInt(result.getString(6)));
+							custIDs.add(Integer.parseInt(result.getString(7)));
+							rHouses.add(rHouse);//add to list
+						}
+						
+						server.sendMessage(rentIDs);//send an array list of rent ids to the client
+						server.sendMessage(rHouses);//send back the array list of rent house transactions to the client
+						server.sendMessage(estateAgentIDs);//send an array list of estate agent ids to the client
+						server.sendMessage(custIDs);//send an array list of customer id to the client
+						break;
+					case 67:
+						//SEARCH FOR RENT TRANSACTIONS INVOLVING A CERTAIN CUSTOMER (SERVER SIDE)
+						rentIDs = new ArrayList<Integer>();
+						rHouses = new ArrayList<RentableHouse>();	//list to hold rentable house objects(data)
+						customers = new ArrayList<Customer>();			//list to hold house objects(data)
+						id = server.getSearchID();					//get search id from the client
+						
+						//example using joins in the sql queries
+						result = db.getResults("SELECT renthouses.RentID, renthouses.HouseID, renthouses.StartDate, renthouses.EndDate, renthouses.MonthlyRate,"+
+											   " renthouses.CustomerID, customer.FirstName, customer.LastName, customer.Address"+
+											   " FROM renthouses"+
+											   " INNER JOIN customer"+
+											   " ON renthouses.CustomerID="+id+" AND renthouses.CustomerID = customer.CustomerID;");//execute select statement and return results
+						
+						//Loop over the results and add each staff members data to an object which is then
+						//added to a list
+						while(result.next())
+						{
+							rHouse = new RentableHouse();
+							customer = new Customer();
+							
+							rentIDs.add(Integer.parseInt(result.getString(1)));
+							rHouse.setId(Integer.parseInt(result.getString(2)));
+							rHouse.setFromDate(result.getString(3));
+							rHouse.setToDate(result.getString(4));
+							rHouse.setRate(Double.parseDouble(result.getString(5)));
+							customer.setCustID(Integer.parseInt(result.getString(6)));
+							customer.setfName(result.getString(7));
+							customer.setlName(result.getString(8));
+							customer.setAddress(result.getString(9));
+							
+							rHouses.add(rHouse);//add to list of rentable houses
+							customers.add(customer);//add to list of associated customers
+						}
+						
+						server.sendMessage(rentIDs);//send list of rent IDs back to client
+						server.sendMessage(rHouses);//send back the array list of rentable houses (trans) to the client
+						server.sendMessage(customers);//send back the array list of houses to the client
+						break;
+					case 68:
+						//SEARCH FOR RENT TRANSACTIONS INVOLVING A CERTAIN ESTATE AGENT(SERVER SIDE)
+						rentIDs = new ArrayList<Integer>();						//list to hold rent ids
+						rHouses = new ArrayList<RentableHouse>();				//list to hold rentable house objects(data)
+						staffMembers  = new ArrayList<StaffMember>();			//list to hold staff member objects(data)
+						id = server.getSearchID();								//get search id from the client
+						
+						//example using joins in the sql queries
+						result = db.getResults("SELECT renthouses.RentID, renthouses.HouseID, renthouses.StartDate, renthouses.EndDate, renthouses.MonthlyRate, renthouses.EstateAgentID,"+
+											   " staff.FirstName, staff.LastName, staff.Address"+
+											   " FROM renthouses"+
+											   " INNER JOIN staff"+
+											   " ON renthouses.EstateAgentID="+id+" AND renthouses.EstateAgentID = staff.Id;");//execute select statement and return results
+						
+						//Loop over the results and add each staff members data to an object which is then
+						//added to a list
+						while(result.next())
+						{
+							rHouse = new RentableHouse();
+							staff = new StaffMember();
+							
+							rentIDs.add(Integer.parseInt(result.getString(1)));
+							rHouse.setId(Integer.parseInt(result.getString(2)));
+							rHouse.setFromDate(result.getString(3));
+							rHouse.setToDate(result.getString(4));
+							rHouse.setRate(Double.parseDouble(result.getString(5)));
+							staff.setId(Integer.parseInt(result.getString(6)));
+							staff.setFirstName(result.getString(7));
+							staff.setLastName(result.getString(8));
+							staff.setAddress(result.getString(9));
+							
+							
+							rHouses.add(rHouse);//add to list of rent houses
+							staffMembers.add(staff);//add to list of associated estate agent (staff member)
+						}
+						
+						server.sendMessage(rentIDs);//send list of rent ids
+						server.sendMessage(rHouses);//send back the array list of rent houses (trans) to the client
 						server.sendMessage(staffMembers);//send back the array list of staff members
 						break;
 				}//end switch
