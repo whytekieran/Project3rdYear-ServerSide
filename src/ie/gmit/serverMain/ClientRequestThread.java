@@ -236,10 +236,8 @@ public class ClientRequestThread extends Thread
 							server.sendMessage("0");
 						}
 						break;
-						//CLOSE THE CLIENT THREAD, LOG OFF (SERVER SIDE)
-					case 2:
-						running = false;	//Set loop control variable to false so loop breaks and program ends
-						break;
+						//case 2 used to be the exit button, pointless feature so it was removed.
+						//no longer a case 2 because of this
 						//CREATE A NEW USER (SERVER SIDE)
 					case 3:
 						user = server.getUserInformation(); //Get user object from the client
